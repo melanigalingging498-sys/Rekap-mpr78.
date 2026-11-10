@@ -28,7 +28,7 @@
     <p>Salin (*copy*) seluruh isi kolom <strong>Menu Items</strong> dari Excel, lalu tempel (*paste*) ke kotak di bawah ini:</p>
     
     <textarea id="dataInput" placeholder="Tempelkan data teks transaksi di sini..."></textarea>
-    <div class="note">*Mode Terkunci Ketat + Tambahan Otomatis Perhitungan Total Gramasi Pemakaian Bahan Baku Berdasarkan SOP.</div>
+    <div class="note">*Mode Terkunci Ketat + Breakdown Paket Otomatis Presisi SOP.</div>
     
     <button onclick="prosesRekapitulasiData()">Proses & Hitung Presisi</button>
 
@@ -77,13 +77,13 @@
 </div>
 
 <script>
-// STANDAR SOP GRAMASI BERDASARKAN GAMBAR
+// STANDAR SOP GRAMASI BERDASARKAN RULES
 const SOP_GRAMASI = {
     "Coklat": { manis: 18, tipker: 11, satuan: "gram" },
     "Keju": { manis: 27, tipker: 13, satuan: "gram" },
     "Kacang": { manis: 13, tipker: 8, satuan: "gram" },
     "Pisang": { manis: 4, tipker: 4, satuan: "potong" },
-    "Peanut Butter": { manis: 30, tipker: 15, satuan: "gram" }, // Skipy / Peanut butter
+    "Peanut Butter": { manis: 30, tipker: 15, satuan: "gram" },
     "Pandan": { manis: 0, tipker: 0, satuan: "gram" },
     "Jagung": { manis: 28, tipker: 0, satuan: "gram" },
     "Wijen": { manis: 0, tipker: 0, satuan: "gram" },
@@ -147,23 +147,56 @@ function prosesRekapitulasiData() {
             }
         }
 
-        if (textLower.includes("keju")) {
-            catatTopping("Keju", kategori, qty);
-        }
-
-        if (textLower.includes("kacang") && !containsCKW) {
-            catatTopping("Kacang", kategori, qty);
-        }
-
-        if (textLower.includes("wijen") && !containsCKW) {
-            catatTopping("Wijen", kategori, qty);
-        }
-
+        if (textLower.includes("keju")) catatTopping("Keju", kategori, qty);
+        if (textLower.includes("kacang") && !containsCKW) catatTopping("Kacang", kategori, qty);
+        if (textLower.includes("wijen") && !containsCKW) catatTopping("Wijen", kategori, qty);
         if (textLower.includes("redvelvet")) catatTopping("Redvelvet", kategori, qty);
         if (textLower.includes("pandan")) catatTopping("Pandan", kategori, qty);
         if (textLower.includes("pisang")) catatTopping("Pisang", kategori, qty);
         if (textLower.includes("jagung")) catatTopping("Jagung", kategori, qty);
-        if (textLower.includes("peanut butter")) catatTopping("Peanut Butter", kategori, qty);
+        if (textLower.includes("peanut butter") || textLower.includes("skipy")) catatTopping("Peanut Butter", kategori, qty);
+    }
+
+    function prosesSingleItem(rawItemText, baseQty) {
+        let text = rawItemText.trim();
+        if (!text) return;
+
+        let itemQty = baseQty;
+        let matchQty = text.match(/^(\d+)x\s*(.*)/i);
+        if (matchQty) {
+            itemQty = baseQty * parseInt(matchQty[1]);
+            text = matchQty[2].trim();
+        }
+
+        // 1. Ekstraksi Paket / Tanda Kurung (...)
+        let parenMatch = text.match(/^(.*?)\((.*?)\)/);
+        if (parenMatch) {
+            let insideBracket = parenMatch[2].trim();
+            let subParts = insideBracket.split('+');
+            subParts.forEach(subPart => {
+                prosesSingleItem(subPart.trim(), itemQty);
+            });
+            return;
+        }
+
+        // 2. Klasifikasi Kategori Terkunci
+        let textLower = text.toLowerCase();
+        let kategori = "";
+
+        if (textLower.includes("telur")) {
+            kategori = "Martabak Telur";
+        } else if (textLower.includes("tipker")) {
+            kategori = "Tipker";
+        } else if (textLower.includes("qr manis") || textLower.includes("qr ") || textLower.includes("reguler")) {
+            kategori = "Manis Reguler";
+        } else if (textLower.includes("cs ") || textLower.includes("manis mini") || textLower.includes("mini") || textLower.includes("ckw")) {
+            kategori = "Manis Mini";
+        } else {
+            kategori = "Manis Mini"; // Default fallback
+        }
+
+        tambahPenjualan(kategori, itemQty);
+        ekstrakToppingItem(text, kategori, itemQty);
     }
 
     lines.forEach(line => {
@@ -171,85 +204,10 @@ function prosesRekapitulasiData() {
         if (!trimmedLine) return;
 
         trimmedLine = trimmedLine.replace(/^"|"$/g, '');
-        let subItems = trimmedLine.split(',');
+        let items = trimmedLine.split(/,(?![^\(]*\))/); // Pisahkan koma di luar tanda kurung
 
-        let activeQty = 1;
-        let activeKategori = "Manis Mini";
-
-        subItems.forEach((subItem, index) => {
-            let text = subItem.trim();
-            if (!text) return;
-
-            let matchQty = text.match(/^(\d+)x\s*(.*)/i);
-            
-            if (matchQty) {
-                activeQty = parseInt(matchQty[1]);
-                text = matchQty[2].trim();
-            } else if (index > 0) {
-                activeQty = activeQty;
-            }
-
-            let textLower = text.toLowerCase();
-
-            if (textLower.includes("telur")) {
-                activeKategori = "Martabak Telur";
-                tambahPenjualan(activeKategori, activeQty);
-                ekstrakToppingItem(text, activeKategori, activeQty);
-                return;
-            }
-
-            if (textLower.includes("romantis") || textLower.includes("double date")) {
-                let matchRedvelvet = text.match(/(\d+)\s*Manis\s*Redvelvet/i);
-                let matchKlasik = text.match(/(\d+)\s*Manis\s*Klasik/i);
-
-                let countRedvelvet = matchRedvelvet ? parseInt(matchRedvelvet[1]) : 1;
-                let countKlasik = matchKlasik ? parseInt(matchKlasik[1]) : 1;
-
-                tambahPenjualan("Manis Mini", countRedvelvet * activeQty);
-                ekstrakToppingItem("Manis Redvelvet Keju", "Manis Mini", countRedvelvet * activeQty);
-
-                tambahPenjualan("Manis Mini", countKlasik * activeQty);
-                ekstrakToppingItem("Manis Klasik CKW", "Manis Mini", countKlasik * activeQty);
-                return;
-            }
-
-            if (textLower.includes("gol rakyat")) {
-                let matchCoklat = text.match(/(\d+)\s*Manis\s*Coklat/i);
-                let matchTipker = text.match(/(\d+)\s*Tipker/i);
-
-                let countCoklat = matchCoklat ? parseInt(matchCoklat[1]) : 2;
-                let countTipker = matchTipker ? parseInt(matchTipker[1]) : 1;
-
-                tambahPenjualan("Manis Mini", countCoklat * activeQty);
-                ekstrakToppingItem("Manis Coklat", "Manis Mini", countCoklat * activeQty);
-
-                tambahPenjualan("Tipker", countTipker * activeQty);
-                ekstrakToppingItem("Tipker CKW", "Tipker", countTipker * activeQty);
-                return;
-            }
-
-            if (textLower.includes("reguler")) {
-                activeKategori = "Manis Reguler";
-            } else if (textLower.includes("tipker")) {
-                activeKategori = "Tipker";
-            } else {
-                if (index > 0 && subItems[0].toLowerCase().includes("reguler")) {
-                    activeKategori = "Manis Reguler";
-                } else if (index > 0 && subItems[0].toLowerCase().includes("tipker")) {
-                    activeKategori = "Tipker";
-                } else if (!textLower.includes("reguler") && !textLower.includes("tipker")) {
-                    activeKategori = "Manis Mini";
-                }
-            }
-
-            let isPureToppingOnly = (textLower === "coklat" || textLower === "keju" || textLower === "kacang" || textLower === "wijen");
-            if (isPureToppingOnly && index > 0) {
-                catatTopping(text, activeKategori, activeQty);
-                return;
-            }
-
-            tambahPenjualan(activeKategori, activeQty);
-            ekstrakToppingItem(text, activeKategori, activeQty);
+        items.forEach(itemStr => {
+            prosesSingleItem(itemStr, 1);
         });
     });
 
@@ -286,10 +244,10 @@ function renderTabelTopping(matriks) {
         tbody.innerHTML += `
             <tr>
                 <td><strong>${top}</strong></td>
-                <td class="text-right">${row["Manis Mini"] || ""}</td>
-                <td class="text-right">${row["Tipker"] || ""}</td>
-                <td class="text-right">${row["Manis Reguler"] || ""}</td>
-                <td class="text-right">${row["Martabak Telur"] || ""}</td>
+                <td class="text-right">${row["Manis Mini"] || 0}</td>
+                <td class="text-right">${row["Tipker"] || 0}</td>
+                <td class="text-right">${row["Manis Reguler"] || 0}</td>
+                <td class="text-right">${row["Martabak Telur"] || 0}</td>
             </tr>
         `;
     });
@@ -309,7 +267,6 @@ function renderTabelGramasi(matriks) {
         let row = matriks[top];
         let sop = SOP_GRAMASI[top] || { manis: 0, tipker: 0, satuan: "gram" };
 
-        // Hitung total pemakaian kategori manis (Manis Mini + Manis Reguler) dan Tipker
         let qtyManis = (row["Manis Mini"] || 0) + (row["Manis Reguler"] || 0);
         let qtyTipker = (row["Tipker"] || 0);
 
@@ -317,10 +274,9 @@ function renderTabelGramasi(matriks) {
         let totalGramTipker = qtyTipker * sop.tipker;
         let totalKeseluruhanGram = totalGramManis + totalGramTipker;
 
-        // Jika ada jumlah di martabak telur (seperti telur ayam/bebek)
         let qtyTelur = (row["Martabak Telur"] || 0);
         if (top.includes("Telur")) {
-            totalKeseluruhanGram = qtyTelur; // Tampilkan jumlah butir telur
+            totalKeseluruhanGram = qtyTelur;
         }
 
         if (totalKeseluruhanGram > 0) {
